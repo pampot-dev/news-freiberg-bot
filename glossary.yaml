@@ -1,0 +1,20 @@
+# Local terms for DE -> RU translation.
+#
+# terms: German term -> Russian translation. Uploaded to DeepL as a glossary when DeepL
+#   supports DE->RU glossaries; otherwise any term DeepL left untranslated in the output
+#   is replaced with its Russian form.
+# fixes: Russian -> Russian replacements applied to every translation (for wording
+#   DeepL consistently gets wrong).
+#
+# Restart the bot after editing.
+
+terms:
+  Silberstadt: Серебряный город
+  Stadtrat: городской совет
+  Amtsverweser: временно исполняющий обязанности обер-бургомистра
+  Oberbürgermeister: обер-бургомистр
+  Kornhaus: Корнхаус
+  Erzgebirge: Рудные горы
+  Welterbe: Всемирное наследие
+
+fixes: {}
