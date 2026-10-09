@@ -264,6 +264,17 @@ class RecipientsRepo(_Repo):
     async def remove_chat(self, chat_id: int) -> int:
         return await self._exec("DELETE FROM recipients WHERE chat_id = ?", (chat_id,))
 
+    async def change_chat_id(self, recipient_id: int, chat_id: int) -> bool:
+        """Follow a group -> supergroup migration. False if the new chat is already a recipient."""
+        try:
+            await self._exec(
+                "UPDATE recipients SET chat_id = ? WHERE id = ?", (chat_id, recipient_id)
+            )
+        except sqlite3.IntegrityError:
+            await self.conn.rollback()
+            return False
+        return True
+
     async def set_active(self, recipient_id: int, active: bool) -> None:
         await self._exec("UPDATE recipients SET active = ? WHERE id = ?", (active, recipient_id))
         if not active:
