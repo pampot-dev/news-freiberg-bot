@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-`SPEC.md` (in Russian) is the authoritative requirements document; read it before making design decisions. User-facing bot text and admin messages must be in Russian. Implementation goes in stages (skeleton → parser → DB → polling → translation → formatter → publisher → monitoring → handlers → main wiring → Docker), one commit per stage.
+`SPEC.md` (in Russian) is the authoritative requirements document; read it before making design decisions. User-facing bot text, admin messages and README are in Russian; code, comments and commits are in English. v1 is implemented; README.md covers setup and deployment.
 
 ## Repository rules (SPEC §16)
 
@@ -22,33 +22,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Admin UI is an inline-keyboard menu (plus the slash commands from SPEC §10).
 - DB: aiosqlite with plain SQL migrations versioned via `PRAGMA user_version`. Scheduling: a plain asyncio loop woken by interval or an `asyncio.Event` (`/run`).
 
-## What the bot does
-
-A Telegram bot that polls news listing pages (first source: freiberg.de Neuigkeiten), translates DE→RU with DeepL, and auto-publishes to multiple Telegram channels/groups.
-
-Pipeline: `sources` (fetch/parse HTML) → `news_items` (dedupe by article URL) → translate (status `pending_translation` → `ready`) → publish to every active recipient (one `deliveries` row per item×recipient) → `published`.
-
-## Planned stack
-
-Python 3.12+, aiogram 3 (long polling, no webhook), httpx, selectolax/BeautifulSoup, official `deepl` lib, SQLite (aiosqlite or SQLAlchemy 2 async), APScheduler or asyncio tasks, pydantic-settings, stdlib `logging` to stdout. Deployed via Docker / docker-compose on AWS EC2 with the DB file in a volume.
-
-Commands:
+## Commands
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # setup
-.venv/bin/pytest -q                                          # all tests
-.venv/bin/pytest tests/test_config.py::test_quiet_hours_parsed   # single test
-.venv/bin/ruff check . && .venv/bin/ruff format --check .    # lint
-docker compose up -d                                         # production run
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"      # setup
+.venv/bin/pytest -q                                             # all tests
+.venv/bin/pytest tests/test_publisher.py::test_no_duplicates_on_rerun   # single test
+.venv/bin/ruff check . && .venv/bin/ruff format --check .       # lint (line length 100)
+.venv/bin/python -m app.main                                    # run locally (needs .env)
+docker compose up -d                                            # production
 ```
 
-`pytest` runs in `asyncio_mode = "auto"`, so async tests need no marker. Build `Settings` in tests with `Settings(_env_file=None, ...)` so a local `.env` doesn't leak in. Target layout is in SPEC.md §13 (`app/sources`, `app/translate`, `app/publish`, `app/handlers`, `app/db`, `app/monitor.py`).
+`pytest` runs with `asyncio_mode = "auto"`, so async tests need no marker. Tests never touch the network: build `Settings` with `Settings(_env_file=None, ...)` (the `settings` fixture), use the in-memory `db` fixture, and `FakeBot` / `notifier` from `tests/conftest.py`. Handler tests feed real `Update`s through the dispatcher with a `MockedSession` (`tests/test_handlers.py`).
+
+## Architecture
+
+Stack: Python 3.12+, aiogram 3 (long polling), httpx, selectolax (`selectolax.lexbor`; the old `selectolax.parser` backend raises ImportError in 1.x), official `deepl` (sync, wrapped in `asyncio.to_thread`), aiosqlite, pydantic-settings.
+
+`app/main.py` starts two things concurrently: the aiogram dispatcher (admin UI) and `Worker.run_forever()` (`app/worker.py`), which runs one cycle every `POLL_INTERVAL_MIN` or when `/run` sets `services.trigger`. A cycle runs these steps in order; each is wrapped so one failing step doesn't stop the others:
+
+1. `poller.poll_all` (`app/poller.py`): fetch each enabled source, insert unknown URLs oldest-first as `pending_translation`, apply first-run logic, update the source's health counters.
+2. `translate.translate_pending` (`app/translate/service.py`): `pending_translation` → `ready`.
+3. `Publisher.run` (`app/publish/publisher.py`): check pause and quiet hours, snapshot deliveries, send round-robin, settle `published`.
+4. `monitor.check_sources` (`app/monitor.py`): send one-shot admin alerts based on source health fields.
+
+Shared state lives in the `Services` dataclass (`app/services.py`), injected into handlers as the `services` workflow-data key. Admin alerts go through `Notifier` (`app/notify.py`); `send_throttled` stores the last-sent time in `kv` (`notified_at:<key>`). Item status flow: `pending_translation` → `ready` → `published`, plus `skipped_initial` and `failed`.
+
+Admin UI (`app/handlers/`): `views.py` builds the screens (text plus inline keyboard, `CallbackData` classes `Menu`/`SourceAction`/`RecipientAction`); `admin.py` is a router factory filtered to `ADMIN_IDS` in private chats; `recipients.py` checks rights and sends the test message; `chat_member.py` handles `my_chat_member` join/leave. Routers are built by factories because an aiogram Router can only be attached to one dispatcher.
+
+DB access goes through `Database` (`app/db/repo.py`) with per-table repos (`db.sources`, `db.news`, `db.recipients`, `db.deliveries`, `db.kv`). Timestamps are stored as UTC ISO strings and converted by `app/db/models.py`. To change the schema, append a new script to `MIGRATIONS` in `app/db/migrations.py`; never edit an applied one.
 
 ## Invariants that span modules
 
 - **Sources are pluggable**: each source is a class implementing `fetch() -> list[NewsItem]` plus a row in the `sources` table. Adding one must not require changes to the core.
 - **freiberg.de parsing** (no RSS; TYPO3 `?type=9818` returns HTML): first page only; title comes from the link's `title` attribute (visible text contains photo credits/dates); strip the trailing `mehr erfahren` from teasers but keep the `…`. Parser tests run against a saved real page in `tests/fixtures/freiberg_neuigkeiten.html`. One request per poll, descriptive `User-Agent` with contact.
-- **Never publish untranslated German.** On DeepL quota exhaustion (HTTP 456) items remain `pending_translation` and admins are notified at most once per day. 429/5xx/network errors use exponential backoff, then retry on the next cycle. Translations are stored and never redone. Glossary: use a DeepL glossary if DE→RU is supported, otherwise post-replace from `glossary.yaml`.
+- **Never publish untranslated German.** On DeepL quota exhaustion (HTTP 456) items remain `pending_translation` and admins are notified at most once per day. 429/5xx/network errors are retried with backoff by the `deepl` library itself (`max_network_retries`), then the item waits for the next cycle without counting an attempt. Translations are stored and never redone. Glossary: use a DeepL glossary if DE→RU is supported, otherwise post-replace from `glossary.yaml`.
 - **No duplicate deliveries**: `deliveries` has a unique key on `(news_item_id, recipient_id)`, and per-recipient status ensures restarts or partial failures don't resend. On 403 → mark recipient inactive and notify admin. On 429 → honor `retry_after`. Other errors → retry next cycle, at most 3 attempts, then notify. Keep to about 20 msgs/min per chat.
 - **Post format**: HTML parse mode with every interpolated string escaped, link preview disabled, truncate with `…` to stay ≤4096 chars (see SPEC §5 template).
 - **Scheduling**: poll every 30 min. During quiet hours (22–07 Europe/Berlin) polling and translation continue but publishing pauses. The backlog publishes oldest-first, with at most N (default 5) posts per chat per cycle. `/pause` stops publishing only, not polling.
@@ -58,7 +66,7 @@ docker compose up -d                                         # production run
 
 ## Configuration
 
-`.env` keys: `BOT_TOKEN`, `DEEPL_API_KEY`, `ADMIN_IDS`, `POLL_INTERVAL_MIN`, `QUIET_HOURS`, `TIMEZONE`, `STALE_DAYS`, `DB_PATH`. Ship a `.env.example`.
+`app/config.py`; all keys are documented in `.env.example`. Beyond the spec it adds `BATCH_LIMIT`, `CONTACT` (goes into the User-Agent), `GLOSSARY_PATH` and `LOG_LEVEL`. `QUIET_HOURS` may be empty to disable quiet hours.
 
 ## Out of scope for v1
 

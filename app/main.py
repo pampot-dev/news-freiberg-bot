@@ -6,6 +6,7 @@ import httpx
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand, BotCommandScopeChat
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.db import Database
@@ -74,5 +75,18 @@ async def main() -> None:
             log.info("bot stopped")
 
 
+def load_settings_or_exit() -> None:
+    try:
+        Settings()
+    except ValidationError as exc:
+        problems = "\n".join(
+            f"  {'.'.join(map(str, e['loc'])).upper()}: {e['msg']}" for e in exc.errors()
+        )
+        raise SystemExit(
+            f"Configuration error (check .env, see .env.example):\n{problems}"
+        ) from None
+
+
 if __name__ == "__main__":
+    load_settings_or_exit()
     asyncio.run(main())
