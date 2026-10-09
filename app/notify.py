@@ -20,10 +20,14 @@ class Notifier:
         self.admin_ids = admin_ids
         self.db = db
 
-    async def send(self, text: str) -> None:
+    async def send(self, text: str, *, is_html: bool = False, reply_markup: Any = None) -> None:
+        """Plain text is escaped; pass is_html=True for pre-built HTML."""
+        body = text if is_html else html.escape(text)
         for admin_id in self.admin_ids:
             try:
-                await self.bot.send_message(admin_id, html.escape(text), parse_mode="HTML")
+                await self.bot.send_message(
+                    admin_id, body, parse_mode="HTML", reply_markup=reply_markup
+                )
             except Exception:
                 # An admin who never started the bot can't be messaged; don't break the cycle.
                 log.exception("failed to notify admin %s", admin_id)
