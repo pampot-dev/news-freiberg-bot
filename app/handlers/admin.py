@@ -3,7 +3,9 @@ from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message
 
 from app.handlers.commands import set_admin_commands
@@ -12,6 +14,7 @@ from app.handlers.views import (
     Menu,
     RecipientAction,
     SourceAction,
+    cancel_add_keyboard,
     confirm_remove_screen,
     main_menu,
     recipients_screen,
@@ -24,10 +27,25 @@ from app.services import Services
 
 log = logging.getLogger(__name__)
 
-ADD_USAGE = (
-    "Использование: <code>/add_recipient &lt;chat_id&gt; [thread_id]</code>\n"
-    "chat_id — число (например, <code>-1001234567890</code>) или @username канала."
+ADD_PROMPT = (
+    "Пришлите <code>chat_id</code> канала или группы, например "
+    "<code>-1001234567890</code>, или @username публичного канала.\n"
+    "Чтобы публиковать в определённую тему группы, добавьте через пробел её "
+    "<code>thread_id</code>: <code>-1001234567890 42</code>."
 )
+
+
+class AddRecipient(StatesGroup):
+    waiting_chat = State()
+
+
+def parse_add_input(text: str) -> tuple[int | str, int | None]:
+    """'<chat_id|@username> [thread_id]' -> (chat_ref, thread_id); ValueError if malformed."""
+    args = text.split()
+    if not 1 <= len(args) <= 2:
+        raise ValueError(text)
+    thread_id = int(args[1]) if len(args) == 2 else None
+    return parse_chat_ref(args[0]), thread_id
 
 
 def create_admin_router(admin_ids: list[int]) -> Router:
@@ -37,78 +55,45 @@ def create_admin_router(admin_ids: list[int]) -> Router:
     router.message.filter(F.chat.type == "private", F.from_user.id.in_(admins))
     router.callback_query.filter(F.message.chat.type == "private", F.from_user.id.in_(admins))
 
-    # --- slash commands ---------------------------------------------------------------
+    # --- the only commands: everything else is in the inline menu ----------------------
 
-    @router.message(Command("start", "menu", "help"))
-    async def cmd_menu(message: Message, bot: Bot, services: Services) -> None:
+    @router.message(Command("start", "menu"))
+    async def cmd_menu(message: Message, bot: Bot, services: Services, state: FSMContext) -> None:
+        await state.clear()
         await set_admin_commands(bot, [message.from_user.id])
         text, markup = await main_menu(services)
         await message.answer(text, reply_markup=markup)
 
-    @router.message(Command("status"))
-    async def cmd_status(message: Message, services: Services) -> None:
-        text, markup = await status_screen(services)
-        await message.answer(text, reply_markup=markup)
-
-    @router.message(Command("pause", "resume"))
-    async def cmd_pause(message: Message, command: CommandObject, services: Services) -> None:
-        await message.answer(await set_paused(services, command.command == "pause"))
-
-    @router.message(Command("sources"))
-    async def cmd_sources(message: Message, services: Services) -> None:
-        text, markup = await sources_screen(services)
-        await message.answer(text, reply_markup=markup)
-
-    @router.message(Command("recipients"))
-    async def cmd_recipients(message: Message, services: Services) -> None:
+    @router.message(AddRecipient.waiting_chat, F.text)
+    async def on_add_input(
+        message: Message, bot: Bot, services: Services, state: FSMContext
+    ) -> None:
+        try:
+            chat_ref, thread_id = parse_add_input(message.text)
+        except ValueError:
+            await message.answer("Не понял. " + ADD_PROMPT, reply_markup=cancel_add_keyboard())
+            return
+        await state.clear()
+        await message.answer(await add_recipient(bot, services.db, chat_ref, thread_id))
         text, markup = await recipients_screen(services)
         await message.answer(text, reply_markup=markup)
 
-    @router.message(Command("add_recipient"))
-    async def cmd_add_recipient(
-        message: Message, command: CommandObject, bot: Bot, services: Services
-    ) -> None:
-        args = (command.args or "").split()
-        try:
-            if not 1 <= len(args) <= 2:
-                raise ValueError
-            chat_ref = parse_chat_ref(args[0])
-            thread_id = int(args[1]) if len(args) == 2 else None
-        except ValueError:
-            await message.answer(ADD_USAGE)
-            return
-        await message.answer(await add_recipient(bot, services.db, chat_ref, thread_id))
-
-    @router.message(Command("remove_recipient"))
-    async def cmd_remove_recipient(
-        message: Message, command: CommandObject, services: Services
-    ) -> None:
-        try:
-            chat_id = int((command.args or "").strip())
-        except ValueError:
-            await message.answer("Использование: <code>/remove_recipient &lt;chat_id&gt;</code>")
-            return
-        removed = await services.db.recipients.remove_chat(chat_id)
-        if removed:
-            await message.answer(f"🗑 Удалено получателей: {removed}.")
-        else:
-            await message.answer(f"Получатель <code>{chat_id}</code> не найден.")
-
-    @router.message(Command("preview"))
-    async def cmd_preview(message: Message, services: Services) -> None:
-        await send_preview(message, services)
-
-    @router.message(Command("run"))
-    async def cmd_run(message: Message, services: Services) -> None:
-        services.trigger.request(message.chat.id)
-        await message.answer("🔄 Опрос запущен, пришлю результат.")
+    # Any other message (including old commands like /status) just opens the menu.
+    router.message()(cmd_menu)
 
     # --- inline menu --------------------------------------------------------------
 
     @router.callback_query(Menu.filter())
-    async def on_menu(query: CallbackQuery, callback_data: Menu, services: Services) -> None:
+    async def on_menu(
+        query: CallbackQuery, callback_data: Menu, services: Services, state: FSMContext
+    ) -> None:
         action = callback_data.action
-        if action in ("pause", "resume"):
+        await state.clear()  # any navigation cancels a pending "add recipient" prompt
+        if action == "add_recipient":
+            await state.set_state(AddRecipient.waiting_chat)
+            await show(query, ADD_PROMPT, cancel_add_keyboard())
+            await query.answer()
+        elif action in ("pause", "resume"):
             await query.answer(await set_paused(services, action == "pause"))
             await show(query, *await main_menu(services))
         elif action == "status":

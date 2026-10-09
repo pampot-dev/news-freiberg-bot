@@ -5,18 +5,8 @@ from aiogram.types import BotCommand, BotCommandScopeChat
 
 log = logging.getLogger(__name__)
 
-ADMIN_COMMANDS = [
-    BotCommand(command="menu", description="Меню администратора"),
-    BotCommand(command="status", description="Состояние бота"),
-    BotCommand(command="pause", description="Приостановить публикацию"),
-    BotCommand(command="resume", description="Возобновить публикацию"),
-    BotCommand(command="sources", description="Источники"),
-    BotCommand(command="recipients", description="Получатели"),
-    BotCommand(command="add_recipient", description="Добавить получателя: chat_id [thread_id]"),
-    BotCommand(command="remove_recipient", description="Удалить получателя: chat_id"),
-    BotCommand(command="preview", description="Предпросмотр последней новости"),
-    BotCommand(command="run", description="Опросить источники сейчас"),
-]
+# Everything else is in the inline menu; the "Menu" button only needs to open it.
+ADMIN_COMMANDS = [BotCommand(command="menu", description="Меню администратора")]
 
 
 async def set_admin_commands(bot: Bot, admin_ids: list[int]) -> None:

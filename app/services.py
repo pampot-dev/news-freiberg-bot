@@ -9,7 +9,7 @@ from app.translate import Translator
 
 @dataclass
 class RunTrigger:
-    """Lets /run wake the main loop early and remember who to report back to."""
+    """Lets "Опросить сейчас" wake the main loop early and remember who to report back to."""
 
     event: asyncio.Event = field(default_factory=asyncio.Event)
     requesters: set[int] = field(default_factory=set)
