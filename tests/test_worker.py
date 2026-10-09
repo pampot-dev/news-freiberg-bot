@@ -118,7 +118,7 @@ async def test_run_forever_reports_to_requester_and_waits_for_trigger(worker, bo
     task = asyncio.create_task(worker.run_forever())
     try:
         await wait_until(lambda: len(bot.texts_to(1001)) == 1)
-        assert bot.texts_to(1001)[0].startswith("Опрос завершён.")
+        assert bot.texts_to(1001)[0].startswith("Цикл завершён.")
         # Without a trigger the loop sleeps for the interval...
         await asyncio.sleep(0.1)
         assert len(bot.texts_to(1001)) == 1
@@ -129,3 +129,38 @@ async def test_run_forever_reports_to_requester_and_waits_for_trigger(worker, bo
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+NIGHT = datetime(2026, 10, 9, 21, 30, tzinfo=UTC)  # 23:30 in Berlin
+
+
+async def test_scheduled_cycle_does_not_poll_at_night(worker, db, bot):
+    await db.recipients.add(-1, None, "one")
+    PageSource.items = [item("a", 1)]
+    with patch("app.worker.utcnow", return_value=NIGHT):
+        report = await worker.run_cycle()
+    assert report.poll_skipped and report.polls == []
+    assert await db.news.count_by_status() == {}
+    assert "Опрос пропущен: тихие часы" in report.summary()
+
+
+async def test_manual_run_polls_at_night_but_does_not_publish(worker, db, bot):
+    await db.recipients.add(-1, None, "one")
+    PageSource.items = [item("a", 1)]
+    with patch("app.worker.utcnow", return_value=NIGHT):
+        report = await worker.run_cycle(manual=True)
+    assert [p.new for p in report.polls] == [1]
+    assert report.translation.translated == 1
+    assert report.publishing.skipped == "quiet_hours"
+    assert bot.texts_to(-1) == []
+
+
+async def test_morning_cycle_polls_and_publishes_at_once(worker, db, bot):
+    await db.recipients.add(-1, None, "one")
+    PageSource.items = [item("a", 1)]
+    with patch("app.worker.utcnow", return_value=NIGHT):
+        await worker.run_cycle()
+    morning = datetime(2026, 10, 10, 5, 0, 1, tzinfo=UTC)  # 07:00:01 in Berlin
+    with patch("app.worker.utcnow", return_value=morning):
+        await worker.run_cycle()
+    assert bot.texts_to(-1)[0].startswith("<b>RU a")

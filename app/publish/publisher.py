@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram.exceptions import (
@@ -38,6 +38,18 @@ def in_quiet_hours(now: datetime, tz: ZoneInfo, hours: tuple[int, int] | None) -
     if start < end:
         return start <= hour < end
     return hour >= start or hour < end
+
+
+def seconds_until_quiet_end(now: datetime, tz: ZoneInfo, hours: tuple[int, int] | None) -> float:
+    """Time left in the current quiet period; 0 outside quiet hours."""
+    if not in_quiet_hours(now, tz, hours):
+        return 0.0
+    local = now.astimezone(tz)
+    end = local.replace(hour=hours[1], minute=0, second=0, microsecond=0)
+    if end <= local:
+        end += timedelta(days=1)
+    # Subtract in UTC: same-tzinfo subtraction ignores DST shifts.
+    return (end.astimezone(UTC) - now.astimezone(UTC)).total_seconds()
 
 
 @dataclass(slots=True)

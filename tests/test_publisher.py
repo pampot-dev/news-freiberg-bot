@@ -10,7 +10,7 @@ from aiogram.exceptions import (
 )
 from aiogram.methods import SendMessage
 
-from app.publish.publisher import PAUSED_KEY, Publisher, in_quiet_hours
+from app.publish.publisher import PAUSED_KEY, Publisher, in_quiet_hours, seconds_until_quiet_end
 from app.sources import NewsItem
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -212,3 +212,17 @@ async def test_group_migration_updates_chat_id(db, bot, publisher):
     assert result.sent == 1
     assert bot.texts_to(-100500)
     assert (await db.recipients.get(rec.id)).chat_id == -100500
+
+
+@pytest.mark.parametrize(
+    ("local", "expected_hours"),
+    [
+        (datetime(2026, 10, 9, 23, 0, tzinfo=BERLIN), 8),
+        (datetime(2026, 10, 10, 6, 30, tzinfo=BERLIN), 0.5),
+        (datetime(2026, 10, 10, 12, 0, tzinfo=BERLIN), 0),
+        # Night of the switch to winter time (25.10.2026): 22:00 -> 07:00 lasts 10 real hours.
+        (datetime(2026, 10, 24, 22, 0, tzinfo=BERLIN), 10),
+    ],
+)
+def test_seconds_until_quiet_end(local, expected_hours):
+    assert seconds_until_quiet_end(local, BERLIN, (22, 7)) == expected_hours * 3600
