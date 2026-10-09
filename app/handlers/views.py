@@ -22,7 +22,8 @@ STATUS_NAMES = {
 
 
 class Menu(CallbackData, prefix="m"):
-    action: str  # main / status / pause / resume / sources / recipients / preview / run
+    # main / status / pause / resume / sources / recipients / add_recipient / preview / run
+    action: str
 
 
 class SourceAction(CallbackData, prefix="s"):
@@ -141,8 +142,8 @@ async def sources_screen(services: Services) -> Screen:
 
 ADD_HINT = (
     "Чтобы добавить получателя, добавьте бота в канал (админом с правом публикации) "
-    "или в группу — я пришлю кнопку «Добавить». Либо командой:\n"
-    "<code>/add_recipient &lt;chat_id&gt; [thread_id]</code>"
+    "или в группу — я пришлю кнопку «Добавить». Либо нажмите «➕ Добавить по chat_id»: "
+    "так можно выбрать и тему в группе с темами."
 )
 
 
@@ -161,9 +162,16 @@ async def recipients_screen(services: Services) -> Screen:
         )
         b.button(text="🗑", callback_data=RecipientAction(action="ask_remove", id=r.id))
     lines.append("\n" + ADD_HINT)
+    b.button(text="➕ Добавить по chat_id", callback_data=Menu(action="add_recipient"))
     _back(b)
-    b.adjust(*([2] * len(recipients)), 1)
+    b.adjust(*([2] * len(recipients)), 1, 1)
     return "\n".join(lines), b.as_markup()
+
+
+def cancel_add_keyboard() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="Отмена", callback_data=Menu(action="recipients"))
+    return b.as_markup()
 
 
 def confirm_remove_screen(recipient: Recipient) -> Screen:

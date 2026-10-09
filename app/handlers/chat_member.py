@@ -30,8 +30,9 @@ def create_chat_member_router() -> Router:
             lines.append("Для публикации бот должен быть администратором с правом публикации.")
         if chat.is_forum:
             lines.append(
-                "В группе включены темы. Чтобы публиковать в определённую тему: "
-                f"<code>/add_recipient {chat.id} &lt;thread_id&gt;</code>"
+                "В группе включены темы. Чтобы публиковать в определённую тему, откройте "
+                "«Получатели» → «➕ Добавить по chat_id» и пришлите "
+                f"<code>{chat.id} &lt;thread_id&gt;</code>"
             )
         if event.from_user:
             lines.append(f"Добавил: {escape(event.from_user.full_name)}")

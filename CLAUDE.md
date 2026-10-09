@@ -19,8 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The first-run "freshest item" also respects quiet hours.
 - `news_items.status = failed` only after repeated non-quota translation failures; delivery failures are tracked per recipient and don't change item status.
 - `sources.first_error_at` (start of the current error streak) is added to support the ">24h unavailable" alert.
-- Admin UI is an inline-keyboard menu (plus the slash commands from SPEC §10).
-- DB: aiosqlite with plain SQL migrations versioned via `PRAGMA user_version`. Scheduling: a plain asyncio loop woken by interval or an `asyncio.Event` (`/run`).
+- Admin UI is an inline-keyboard menu only (SPEC §10): `/start` and `/menu` open it, any other admin message does too; the Telegram command list contains just `/menu`. Adding a recipient by `chat_id [thread_id]` is an FSM prompt (`AddRecipient` in `app/handlers/admin.py`).
+- DB: aiosqlite with plain SQL migrations versioned via `PRAGMA user_version`. Scheduling: a plain asyncio loop woken by interval or an `asyncio.Event` (the "Опросить сейчас" button).
 
 ## Commands
 
@@ -39,7 +39,7 @@ docker compose up -d                                            # production
 
 Stack: Python 3.12+, aiogram 3 (long polling), httpx, selectolax (`selectolax.lexbor`; the old `selectolax.parser` backend raises ImportError in 1.x), official `deepl` (sync, wrapped in `asyncio.to_thread`), aiosqlite, pydantic-settings.
 
-`app/main.py` starts two things concurrently: the aiogram dispatcher (admin UI) and `Worker.run_forever()` (`app/worker.py`), which runs one cycle every `POLL_INTERVAL_MIN` or when `/run` sets `services.trigger`. A cycle runs these steps in order; each is wrapped so one failing step doesn't stop the others:
+`app/main.py` starts two things concurrently: the aiogram dispatcher (admin UI) and `Worker.run_forever()` (`app/worker.py`), which runs one cycle every `POLL_INTERVAL_MIN` or when the "Опросить сейчас" button sets `services.trigger`. A cycle runs these steps in order; each is wrapped so one failing step doesn't stop the others:
 
 1. `poller.poll_all` (`app/poller.py`): fetch each enabled source, insert unknown URLs oldest-first as `pending_translation`, apply first-run logic, update the source's health counters.
 2. `translate.translate_pending` (`app/translate/service.py`): `pending_translation` → `ready`.
@@ -48,7 +48,7 @@ Stack: Python 3.12+, aiogram 3 (long polling), httpx, selectolax (`selectolax.le
 
 Shared state lives in the `Services` dataclass (`app/services.py`), injected into handlers as the `services` workflow-data key. Admin alerts go through `Notifier` (`app/notify.py`); `send_throttled` stores the last-sent time in `kv` (`notified_at:<key>`). Item status flow: `pending_translation` → `ready` → `published`, plus `skipped_initial` and `failed`.
 
-Admin UI (`app/handlers/`): `views.py` builds the screens (text plus inline keyboard, `CallbackData` classes `Menu`/`SourceAction`/`RecipientAction`); `admin.py` is a router factory filtered to `ADMIN_IDS` in private chats; `recipients.py` checks rights and sends the test message; `chat_member.py` handles `my_chat_member` join/leave. Routers are built by factories because an aiogram Router can only be attached to one dispatcher.
+Admin UI (`app/handlers/`): `views.py` builds the screens (text plus inline keyboard, `CallbackData` classes `Menu`/`SourceAction`/`RecipientAction`); `admin.py` is a router factory filtered to `ADMIN_IDS` in private chats; `commands.py` sets Telegram's command list (on startup and on every `/start`); `recipients.py` checks rights and sends the test message; `chat_member.py` handles `my_chat_member` join/leave. Routers are built by factories because an aiogram Router can only be attached to one dispatcher.
 
 DB access goes through `Database` (`app/db/repo.py`) with per-table repos (`db.sources`, `db.news`, `db.recipients`, `db.deliveries`, `db.kv`). Timestamps are stored as UTC ISO strings and converted by `app/db/models.py`. To change the schema, append a new script to `MIGRATIONS` in `app/db/migrations.py`; never edit an applied one.
 
@@ -59,10 +59,10 @@ DB access goes through `Database` (`app/db/repo.py`) with per-table repos (`db.s
 - **Never publish untranslated German.** On DeepL quota exhaustion (HTTP 456) items remain `pending_translation` and admins are notified at most once per day. 429/5xx/network errors are retried with backoff by the `deepl` library itself (`max_network_retries`), then the item waits for the next cycle without counting an attempt. Translations are stored and never redone. Glossary: use a DeepL glossary if DE→RU is supported, otherwise post-replace from `glossary.yaml`.
 - **No duplicate deliveries**: `deliveries` has a unique key on `(news_item_id, recipient_id)`, and per-recipient status ensures restarts or partial failures don't resend. On 403 → mark recipient inactive and notify admin. On 429 → honor `retry_after`. Other errors → retry next cycle, at most 3 attempts, then notify. Keep to about 20 msgs/min per chat.
 - **Post format**: HTML parse mode with every interpolated string escaped, link preview disabled, truncate with `…` to stay ≤4096 chars (see SPEC §5 template).
-- **Scheduling**: poll every 30 min. During quiet hours (22–07 Europe/Berlin) scheduled cycles skip polling and publishing (manual `/run` still polls and translates, but doesn't publish); the worker sleeps until quiet hours end so the morning cycle runs at 07:00 sharp. The backlog publishes oldest-first, with at most N (default 5) posts per chat per cycle. `/pause` stops publishing only, not polling.
+- **Scheduling**: poll every 30 min. During quiet hours (22–07 Europe/Berlin) scheduled cycles skip polling and publishing (a manual run still polls and translates, but doesn't publish); the worker sleeps until quiet hours end so the morning cycle runs at 07:00 sharp. The backlog publishes oldest-first, with at most N (default 5) posts per chat per cycle. Pause stops publishing only, not polling.
 - **First run of a source**: mark all found items `skipped_initial` except the freshest one (by date, ties broken by first in list), which gets published.
 - **Monitoring** (DMs to all `ADMIN_IDS`): no new items for `STALE_DAYS` triggers one alert, re-armed only after a new item arrives. 0 parsed items for 3 consecutive polls triggers an immediate alert. Source HTTP errors lasting >24h trigger an alert. On `my_chat_member` (bot added to a chat), send admins the chat title and `chat_id`.
-- **Admin commands** (SPEC §10) only work for `ADMIN_IDS` and only in private chat.
+- **Admin menu** (SPEC §10) only works for `ADMIN_IDS` and only in private chat.
 
 ## Configuration
 

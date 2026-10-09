@@ -152,7 +152,7 @@ async def test_menu_for_admin(env):
     assert commands.commands == ADMIN_COMMANDS
 
 
-@pytest.mark.parametrize("text", ["/start", "/status", "/pause", "/run", "/add_recipient -100"])
+@pytest.mark.parametrize("text", ["/start", "/menu", "/status", "-100", "hello"])
 async def test_non_admin_is_ignored(env, text):
     session, services, feed = env
     await feed(message=private_message(text, uid=STRANGER))
@@ -167,7 +167,7 @@ async def test_commands_ignored_in_groups(env):
         date=NOW,
         chat=Chat(id=-100, type="supergroup"),
         from_user=user(ADMIN),
-        text="/status",
+        text="/menu",
     )
     await feed(message=msg)
     assert session.requests == []
@@ -186,7 +186,7 @@ async def test_pause_and_resume_buttons(env):
     assert await services.db.kv.get_bool(PAUSED_KEY)
     [edit] = session.of_type(EditMessageText)
     assert Menu(action="resume").pack() in buttons(edit)
-    await feed(message=private_message("/resume"))
+    await feed(callback_query=callback(Menu(action="resume")))
     assert not await services.db.kv.get_bool(PAUSED_KEY)
 
 
@@ -240,46 +240,78 @@ def admin_member(can_post=True):
     )
 
 
+async def start_add(feed):
+    await feed(callback_query=callback(Menu(action="add_recipient")))
+
+
 async def test_add_recipient_checks_rights_and_sends_test(env):
     session, services, feed = env
     session.chats[-100] = channel()
     session.members[-100] = admin_member()
-    await feed(message=private_message("/add_recipient -100"))
+    await start_add(feed)
+    [prompt] = session.of_type(EditMessageText)
+    assert "chat_id" in prompt.text
+    await feed(message=private_message("-100"))
     [test] = session.sent(-100)
     assert test.text == TEST_MESSAGE
-    assert "добавлен" in session.sent(ADMIN)[-1].text
+    assert "добавлен" in session.sent(ADMIN)[-2].text
+    assert "Получатели" in session.sent(ADMIN)[-1].text
     [r] = await services.db.recipients.list()
-    assert (r.chat_id, r.title) == (-100, "Новости")
+    assert (r.chat_id, r.thread_id, r.title) == (-100, None, "Новости")
+
+
+async def test_add_recipient_with_thread(env):
+    session, services, feed = env
+    session.chats[-100] = channel()
+    session.members[-100] = admin_member()
+    await start_add(feed)
+    await feed(message=private_message("-100 42"))
+    [test] = session.sent(-100)
+    assert test.message_thread_id == 42
+    [r] = await services.db.recipients.list()
+    assert r.thread_id == 42
 
 
 async def test_add_recipient_without_post_rights(env):
     session, services, feed = env
     session.chats[-100] = channel()
     session.members[-100] = admin_member(can_post=False)
-    await feed(message=private_message("/add_recipient -100"))
+    await start_add(feed)
+    await feed(message=private_message("-100"))
     assert session.sent(-100) == []
-    assert "правом публикации" in session.sent(ADMIN)[-1].text
+    assert "правом публикации" in session.sent(ADMIN)[-2].text
     assert await services.db.recipients.list() == []
 
 
-async def test_add_recipient_unknown_chat_and_bad_args(env):
+async def test_add_recipient_unknown_chat_and_bad_input(env):
     session, services, feed = env
-    await feed(message=private_message("/add_recipient -999"))
-    assert "не видит чат" in session.sent(ADMIN)[-1].text
-    await feed(message=private_message("/add_recipient abc"))
-    assert "Использование" in session.sent(ADMIN)[-1].text
+    await start_add(feed)
+    await feed(message=private_message("abc"))
+    assert session.sent(ADMIN)[-1].text.startswith("Не понял")
+    await feed(message=private_message("-999"))  # still waiting after bad input
+    assert "не видит чат" in session.sent(ADMIN)[-2].text
 
 
-async def test_remove_recipient_command(env):
+async def test_add_recipient_cancel(env):
     session, services, feed = env
-    await services.db.recipients.add(-100, None, "x")
-    await feed(message=private_message("/remove_recipient -100"))
-    assert await services.db.recipients.list() == []
+    await start_add(feed)
+    await feed(callback_query=callback(Menu(action="recipients")))
+    await feed(message=private_message("-100"))
+    # Prompt cancelled: the text just opens the menu instead of adding a recipient.
+    assert "Меню администратора" in session.sent(ADMIN)[-1].text
+    assert session.of_type(GetChat) == []
+
+
+async def test_any_text_opens_menu(env):
+    session, _, feed = env
+    await feed(message=private_message("/status"))
+    [reply] = session.sent(ADMIN)
+    assert "Меню администратора" in reply.text
 
 
 async def test_preview(env):
     session, services, feed = env
-    await feed(message=private_message("/preview"))
+    await feed(callback_query=callback(Menu(action="preview")))
     assert session.sent(ADMIN)[-1].text == "Новостей пока нет."
 
     src = await services.db.sources.ensure("s", "S", "u")
@@ -290,7 +322,7 @@ async def test_preview(env):
     )
     await services.db.news.commit()
     await services.db.news.set_translation(item_id, "Заголовок", "Текст")
-    await feed(message=private_message("/preview"))
+    await feed(callback_query=callback(Menu(action="preview")))
     post = session.sent(ADMIN)[-1]
     assert post.text.startswith("<b>Заголовок</b>")
     assert post.link_preview_options.is_disabled
@@ -298,7 +330,7 @@ async def test_preview(env):
 
 async def test_run_triggers_poll(env):
     session, services, feed = env
-    await feed(message=private_message("/run"))
+    await feed(callback_query=callback(Menu(action="run")))
     assert services.trigger.event.is_set()
     assert services.trigger.take_requesters() == {ADMIN}
 

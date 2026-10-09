@@ -64,7 +64,7 @@ class CycleReport:
 
 
 class Worker:
-    """poll -> translate -> publish -> monitor, every POLL_INTERVAL_MIN or on /run."""
+    """poll -> translate -> publish -> monitor, every POLL_INTERVAL_MIN or on "Опросить сейчас"."""
 
     def __init__(
         self,
@@ -81,7 +81,7 @@ class Worker:
         )
 
     async def run_cycle(self, manual: bool = False) -> CycleReport:
-        """One pass. Scheduled cycles don't poll during quiet hours; /run (manual) always does."""
+        """One pass. Scheduled cycles don't poll during quiet hours; a manual run always does."""
         s = self.services
         report = CycleReport()
         # Each step is isolated: a bug in one must not stop the others or the loop.
