@@ -31,7 +31,17 @@ Pipeline: `sources` (fetch/parse HTML) → `news_items` (dedupe by article URL) 
 
 Python 3.12+, aiogram 3 (long polling, no webhook), httpx, selectolax/BeautifulSoup, official `deepl` lib, SQLite (aiosqlite or SQLAlchemy 2 async), APScheduler or asyncio tasks, pydantic-settings, stdlib `logging` to stdout. Deployed via Docker / docker-compose on AWS EC2 with the DB file in a volume.
 
-Expected commands per spec: `pytest` for tests, `docker compose up -d` to run. Target layout is in SPEC.md §13 (`app/sources`, `app/translate`, `app/publish`, `app/handlers`, `app/db`, `app/monitor.py`).
+Commands:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # setup
+.venv/bin/pytest -q                                          # all tests
+.venv/bin/pytest tests/test_config.py::test_quiet_hours_parsed   # single test
+.venv/bin/ruff check . && .venv/bin/ruff format --check .    # lint
+docker compose up -d                                         # production run
+```
+
+`pytest` runs in `asyncio_mode = "auto"`, so async tests need no marker. Build `Settings` in tests with `Settings(_env_file=None, ...)` so a local `.env` doesn't leak in. Target layout is in SPEC.md §13 (`app/sources`, `app/translate`, `app/publish`, `app/handlers`, `app/db`, `app/monitor.py`).
 
 ## Invariants that span modules
 
