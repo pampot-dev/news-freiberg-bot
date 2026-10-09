@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message
 
+from app.handlers.commands import set_admin_commands
 from app.handlers.recipients import add_recipient, parse_chat_ref
 from app.handlers.views import (
     Menu,
@@ -39,7 +40,8 @@ def create_admin_router(admin_ids: list[int]) -> Router:
     # --- slash commands ---------------------------------------------------------------
 
     @router.message(Command("start", "menu", "help"))
-    async def cmd_menu(message: Message, services: Services) -> None:
+    async def cmd_menu(message: Message, bot: Bot, services: Services) -> None:
+        await set_admin_commands(bot, [message.from_user.id])
         text, markup = await main_menu(services)
         await message.answer(text, reply_markup=markup)
 

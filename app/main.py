@@ -5,12 +5,12 @@ import logging
 import httpx
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import BotCommand, BotCommandScopeChat
 from pydantic import ValidationError
 
 from app.config import Settings
 from app.db import Database
 from app.handlers import create_dispatcher
+from app.handlers.commands import set_admin_commands
 from app.logging_setup import setup_logging
 from app.notify import Notifier
 from app.services import Services
@@ -19,28 +19,6 @@ from app.translate import DeeplTranslator, Glossary
 from app.worker import Worker
 
 log = logging.getLogger(__name__)
-
-ADMIN_COMMANDS = [
-    BotCommand(command="menu", description="Меню администратора"),
-    BotCommand(command="status", description="Состояние бота"),
-    BotCommand(command="pause", description="Приостановить публикацию"),
-    BotCommand(command="resume", description="Возобновить публикацию"),
-    BotCommand(command="sources", description="Источники"),
-    BotCommand(command="recipients", description="Получатели"),
-    BotCommand(command="add_recipient", description="Добавить получателя: chat_id [thread_id]"),
-    BotCommand(command="remove_recipient", description="Удалить получателя: chat_id"),
-    BotCommand(command="preview", description="Предпросмотр последней новости"),
-    BotCommand(command="run", description="Опросить источники сейчас"),
-]
-
-
-async def set_admin_commands(bot: Bot, admin_ids: list[int]) -> None:
-    """Show the command list only in admins' private chats."""
-    for admin_id in admin_ids:
-        try:
-            await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
-        except Exception as exc:  # admin hasn't started the bot yet
-            log.warning("cannot set commands for admin %s: %s", admin_id, exc)
 
 
 async def main() -> None:

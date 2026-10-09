@@ -13,6 +13,7 @@ from aiogram.methods import (
     GetChat,
     GetChatMember,
     SendMessage,
+    SetMyCommands,
 )
 from aiogram.types import (
     CallbackQuery,
@@ -28,6 +29,7 @@ from aiogram.types import (
 )
 
 from app.handlers import create_dispatcher
+from app.handlers.commands import ADMIN_COMMANDS
 from app.handlers.recipients import TEST_MESSAGE, rights_problem
 from app.handlers.views import Menu, RecipientAction, SourceAction
 from app.notify import Notifier
@@ -143,6 +145,11 @@ async def test_menu_for_admin(env):
     assert "Меню администратора" in reply.text
     assert Menu(action="status").pack() in buttons(reply)
     assert Menu(action="pause").pack() in buttons(reply)
+    # /start (re)installs Telegram's "Menu" button: commands fail to set for an admin
+    # who hadn't started the bot at launch time.
+    [commands] = session.of_type(SetMyCommands)
+    assert commands.scope.chat_id == ADMIN
+    assert commands.commands == ADMIN_COMMANDS
 
 
 @pytest.mark.parametrize("text", ["/start", "/status", "/pause", "/run", "/add_recipient -100"])
