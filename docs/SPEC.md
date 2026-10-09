@@ -145,7 +145,7 @@
 - Логирование: стандартный `logging` в stdout с уровнем из конфига.
 - **Деплой:** AWS EC2 для публичных ботов, через Docker (Dockerfile и docker-compose). Файл БД лежит в volume.
 - **`.env`:** `BOT_TOKEN`, `DEEPL_API_KEY`, `ADMIN_IDS`, `POLL_INTERVAL_MIN=30`, `QUIET_HOURS=22-7`, `TIMEZONE=Europe/Berlin`, `STALE_DAYS=7`, `DB_PATH`.
-- Обязательно добавить `.env.example`, `README.md` с инструкцией по запуску и деплою, `.gitignore`.
+- Обязательно добавить `.env.example`, `README.md` (английский) и `README_RU.md` (русский) со ссылками на инструкции по запуску и деплою в `docs/`, `.gitignore`.
 
 ## 13. Структура проекта (ориентир)
 
@@ -177,7 +177,8 @@ news-bot/
   Dockerfile
   docker-compose.yml
   .env.example
-  README.md
+  README.md, README_RU.md
+  docs/            # SPEC.md, инструкции en/ и ru/
 ```
 
 ## 14. Критерии приёмки
