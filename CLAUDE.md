@@ -14,7 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Decisions beyond the spec (agreed with the user)
 
-- Delivery rows are created when an item becomes publishable, only for recipients active at that moment; recipients added later don't receive old items.
+- Delivery rows are snapshotted once per item (`news_items.deliveries_created_at`) in the first publish cycle that has at least one active recipient, for the recipients active at that moment; recipients added later don't receive it. Until a recipient exists the item waits in `ready` (so the first-run item isn't lost before the admin adds chats). An item becomes `published` when it has no `pending` deliveries left.
+- Items are inserted oldest-first, so `ORDER BY published_date, id` is chronological (see `CHRONO` in `app/db/repo.py`).
 - The first-run "freshest item" also respects quiet hours.
 - `news_items.status = failed` only after repeated non-quota translation failures; delivery failures are tracked per recipient and don't change item status.
 - `sources.first_error_at` (start of the current error streak) is added to support the ">24h unavailable" alert.
