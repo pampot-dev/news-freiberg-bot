@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-`SPEC.md` (in Russian) is the authoritative requirements document; read it before making design decisions. User-facing bot text, admin messages and README are in Russian; code, comments and commits are in English. v1 is implemented; README.md covers setup and deployment.
+`docs/SPEC.md` (in Russian) is the authoritative requirements document; read it before making design decisions. User-facing bot text and admin messages are in Russian; code, comments and commits are in English. v1 is implemented.
+
+Docs come in two languages that must be kept in sync: `README.md` (English) and `README_RU.md` (Russian) are short entry points linking to `docs/en/` and `docs/ru/` (`setup.md`, `usage.md`, `development.md`). When behavior or configuration changes, update both language versions.
 
 ## Repository rules (SPEC §16)
 

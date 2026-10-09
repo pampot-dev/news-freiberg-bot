@@ -1,146 +1,29 @@
 # news-freiberg-bot
 
-Telegram-бот, который каждые 30 минут читает список новостей на [freiberg.de](https://www.freiberg.de/stadt-und-buerger/aktuelles/neuigkeiten), переводит заголовки и анонсы с немецкого на русский через DeepL и публикует их в Telegram-каналы и группы.
+**English** | [Русский](README_RU.md)
 
-Полные требования описаны в [SPEC.md](SPEC.md).
+A Telegram bot that reads the news list on [freiberg.de](https://www.freiberg.de/stadt-und-buerger/aktuelles/neuigkeiten) every 30 minutes, translates titles and teasers from German to Russian with DeepL, and posts them to Telegram channels and groups.
 
-## Что нужно для запуска
+- Posts only translated news, oldest first, never twice.
+- At night (22:00–07:00 Berlin time) it doesn't touch the site and posts nothing.
+- Managed through an inline menu in a private chat with the bot.
+- Alerts admins about problems: bot removed from a chat, site down, page layout changed, DeepL quota exhausted.
 
-1. **Токен бота.** Создайте бота у [@BotFather](https://t.me/BotFather) командой `/newbot` и скопируйте токен.
-2. **Ключ DeepL API Free.** Зарегистрируйтесь на [deepl.com/pro-api](https://www.deepl.com/pro-api) (тариф Free, 500 000 символов в месяц). Ключ находится в разделе Account → API Keys и заканчивается на `:fx`.
-3. **Ваш Telegram user ID.** Его можно узнать, например, у [@userinfobot](https://t.me/userinfobot).
-4. **Docker с плагином Compose** на сервере.
+The bot's own interface and posts are in Russian.
 
-## Настройка
-
-```bash
-cp .env.example .env
-```
-
-Заполните `.env`:
-
-| Переменная | Описание | По умолчанию |
-|---|---|---|
-| `BOT_TOKEN` | токен от @BotFather | — |
-| `DEEPL_API_KEY` | ключ DeepL API Free | — |
-| `ADMIN_IDS` | ID админов через запятую | — |
-| `POLL_INTERVAL_MIN` | интервал опроса, минуты | `30` |
-| `QUIET_HOURS` | тихие часы, когда ничего не публикуется; пусто — выключено | `22-7` |
-| `TIMEZONE` | часовой пояс для тихих часов | `Europe/Berlin` |
-| `STALE_DAYS` | через сколько дней без новостей уведомлять админа | `7` |
-| `DB_PATH` | путь к SQLite (в Docker задаётся в compose) | `data/bot.db` |
-| `BATCH_LIMIT` | сколько постов подряд отправлять в один чат за цикл | `5` |
-| `CONTACT` | e-mail или URL для User-Agent: так владельцы сайта смогут связаться | — |
-| `LOG_LEVEL` | уровень логов | `INFO` |
-
-**Важно.** Каждый админ должен хотя бы один раз написать боту `/start`. Иначе Telegram не даст боту прислать ему уведомление.
-
-## Запуск
+## Quick start
 
 ```bash
+git clone https://github.com/pampot-dev/news-freiberg-bot.git && cd news-freiberg-bot
+cp .env.example .env   # set BOT_TOKEN, DEEPL_API_KEY and ADMIN_IDS
 docker compose up -d
-docker compose logs -f
 ```
 
-База данных хранится в Docker volume `bot-data` и не теряется при перезапуске или пересборке контейнера. Глоссарий `glossary.yaml` подключён с хоста: после правки выполните `docker compose restart`.
+Then send `/start` to the bot in a private chat and add it to a channel or group.
 
-Обновление после `git pull`:
+## Documentation
 
-```bash
-docker compose up -d --build
-```
-
-## Как работать с ботом
-
-Напишите боту в личку `/start` или нажмите кнопку «Меню» слева от поля ввода. Откроется меню с кнопками:
-
-- **📊 Статус:** состояние публикации, время последнего опроса, очередь, остаток квоты DeepL.
-- **⏸ Пауза / ▶️ Возобновить:** остановка и возобновление публикации. Опрос и перевод при этом продолжаются.
-- **📰 Источники:** включение и выключение источников.
-- **👥 Получатели:** список получателей, отключение (⏸/▶️), удаление (🗑) и добавление по `chat_id`.
-- **👁 Предпросмотр:** последняя новость в виде поста, без публикации.
-- **🔄 Опросить сейчас:** внеочередной цикл с отчётом о результате.
-
-Текстовых команд, кроме `/start` и `/menu`, нет: любое другое сообщение тоже открывает меню. Бот отвечает только пользователям из `ADMIN_IDS` и только в личном чате.
-
-### Добавление канала или группы
-
-1. Добавьте бота в канал **администратором с правом публикации сообщений**. В группу добавьте его участником с правом писать.
-2. Бот пришлёт админам название чата, `chat_id` и кнопку **«➕ Добавить в получатели»**.
-3. После нажатия бот проверит права и отправит в чат тестовое сообщение.
-
-Добавить можно и вручную: «👥 Получатели» → «➕ Добавить по chat_id», затем прислать `<chat_id> [thread_id]`. `thread_id` нужен, чтобы публиковать в конкретную тему группы с темами.
-
-### Как ведёт себя бот
-
-- **Первый запуск.** Все новости со страницы считаются уже виденными, публикуется только самая свежая. Если получателей ещё нет, она подождёт первого добавленного.
-- **Тихие часы.** С 22:00 до 07:00 бот не обращается к сайту и ничего не публикует. Ровно в 07:00 он опрашивает сайт и публикует новое от старых к новым, не больше `BATCH_LIMIT` за цикл в каждый чат. «Опросить сейчас» работает и ночью, но публикация ждёт утра.
-- **Без перевода новость не публикуется.** Если DeepL недоступен или квота исчерпана, новость ждёт, а админ получает уведомление (не чаще раза в сутки).
-- **Дубли исключены.** Каждая отправка фиксируется в БД, поэтому перезапуск не приводит к повторной публикации.
-- **Уведомления админам** приходят в следующих случаях:
-  - бота удалили из чата или у него нет прав;
-  - на сайте нет новостей `STALE_DAYS` дней;
-  - парсер трижды подряд ничего не нашёл (скорее всего, изменилась вёрстка);
-  - сайт недоступен больше суток;
-  - не удалось отправить сообщение после 3 попыток.
-
-### Глоссарий
-
-В `glossary.yaml` два раздела:
-
-- `terms`: местные термины DE → RU. Если DeepL поддерживает глоссарии для пары DE→RU, бот загружает их в DeepL. Иначе он заменяет в переводе немецкие слова, которые DeepL оставил без перевода.
-- `fixes`: замены RU → RU для формулировок, которые DeepL стабильно переводит неудачно.
-
-## Деплой на AWS EC2
-
-1. Создайте инстанс, например `t3.micro` или `t4g.micro` с Amazon Linux 2023 или Ubuntu. Входящие порты, кроме SSH, не нужны: бот работает через long polling.
-2. Установите Docker и плагин Compose.
-
-   Amazon Linux 2023:
-
-   ```bash
-   sudo dnf install -y docker git
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker $USER   # перелогиньтесь после этого
-   sudo mkdir -p /usr/local/lib/docker/cli-plugins
-   sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m) \
-     -o /usr/local/lib/docker/cli-plugins/docker-compose
-   sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-   ```
-
-   Ubuntu: `sudo apt install -y docker.io docker-compose-v2 git`.
-3. Склонируйте репозиторий, создайте `.env` и запустите:
-
-   ```bash
-   git clone <url-репозитория> news-freiberg-bot && cd news-freiberg-bot
-   cp .env.example .env && nano .env
-   docker compose up -d
-   ```
-
-Контейнер перезапускается автоматически (`restart: unless-stopped`), в том числе после перезагрузки инстанса.
-
-### Резервная копия базы
-
-```bash
-docker compose exec bot python -c "import sqlite3; s=sqlite3.connect('/app/data/bot.db'); d=sqlite3.connect('/app/data/backup.db'); s.backup(d)"
-docker compose cp bot:/app/data/backup.db ./backup.db
-```
-
-## Разработка
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q                       # тесты
-.venv/bin/ruff check . && .venv/bin/ruff format --check .
-.venv/bin/python -m app.main              # локальный запуск (нужен .env)
-```
-
-Тесты не обращаются к сети: парсер проверяется на сохранённой странице `tests/fixtures/freiberg_neuigkeiten.html`, а Telegram и DeepL заменены фейками.
-
-### Новый источник
-
-1. Создайте класс-наследник `app.sources.base.Source` с уникальным `key` и методом `fetch()`, который возвращает `list[NewsItem]`.
-2. Импортируйте модуль в `app/sources/__init__.py` и добавьте источник в `DEFAULT_SOURCES`.
-
-Ядро бота менять не нужно.
+- [Setup and deployment](docs/en/setup.md): `.env` settings, running, updating, AWS EC2, backup.
+- [Using the bot](docs/en/usage.md): menu, recipients, bot behavior, glossary.
+- [Development](docs/en/development.md): tests, layout, adding a source.
+- [Specification](docs/SPEC.md) (in Russian).
